@@ -38,7 +38,7 @@ syscall_init (void) {
 }
 
 static void
-halt (void){
+halt (void) {
 	power_off();
 }
 

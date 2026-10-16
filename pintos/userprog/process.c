@@ -50,8 +50,11 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char *save_ptr;
+	char *parsed_file_name = strtok_r (file_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (parsed_file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -200,7 +203,12 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
+process_wait (tid_t child_tid) {
+
+	while (1) {
+		thread_yield();
+	}
+	
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
@@ -216,7 +224,9 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
 	process_cleanup ();
+
 }
 
 /* Free the current process's resources. */
@@ -460,9 +470,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	if_->R.rdi = argc;                   
 	if_->R.rsi = if_->rsp + 8; // return addr 위가 argv[0]
-	//debug
-    printf("DEBUG\n");
-    hex_dump(if_->rsp, (void *)if_->rsp, USER_STACK - if_->rsp, true);
+
 	success = true;
 
 done:
