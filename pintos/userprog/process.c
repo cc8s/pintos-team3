@@ -328,6 +328,15 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+ 
+	if (strlen(file_name) > 128)
+		goto done;
+
+	char *token, *save_ptr;
+	char file_name_temp[128];
+	strlcpy(file_name_temp, file_name, sizeof(file_name_temp));
+
+	char *parsed_file_name = strtok_r (file_name_temp, " ", &save_ptr);
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -336,9 +345,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (parsed_file_name);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", parsed_file_name);
 		goto done;
 	}
 
@@ -350,7 +359,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", parsed_file_name);
 		goto done;
 	}
 
@@ -414,9 +423,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-
+	
 	success = true;
 
 done:

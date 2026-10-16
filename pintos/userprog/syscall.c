@@ -37,10 +37,53 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
+static void
+halt (void){
+	power_off();
+}
+
+static void
+exit (int status) {
+	thread_current ()->exit_status = status; 
+	thread_exit ();
+}
+
+static int
+write (int fd, const void *buffer, unsigned size){
+	if (fd == 1) {
+		putbuf (buffer, size);
+		return size;
+	} 
+	else {
+		thread_exit ();
+	}
+}
+
+
 /* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+syscall_handler (struct intr_frame *f) {
+    /* 시스템 콜 번호: rax
+	 * 인자 순서 rdi, rsi, rdx, r10, r8, r9 
+     */
+
+    switch (f->R.rax) {
+        case SYS_HALT:
+            halt ();
+            break;
+
+        case SYS_EXIT: 
+			/* f->R.rdi == status */
+			exit((int) f->R.rdi);
+            break;
+
+        case SYS_WRITE: 
+			/* f->R.rdi == fd,	f->R.rsi == buffer,  f->R.rdx == size */
+			f->R.rax = write((int) f->R.rdi, (char *) f->R.rsi, (unsigned) f->R.rdx);
+            break;
+
+        default:
+            exit(-1);
+            break;
+    }
 }
