@@ -33,6 +33,20 @@ process_init (void) {
 	struct thread *current = thread_current ();
 }
 
+static void find_file_name (const char *src, char *dst) {
+	int i = 0;
+	int j = 0;
+	while (src[i] == 32) {
+		i++;
+	}
+	while (src[i] != 32 && src[i] != '\0') {
+		dst[j] = src[i];
+		i++;
+		j++;
+	}
+	dst[j] = '\0';
+}
+
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
  * before process_create_initd() returns. Returns the initd's
@@ -41,6 +55,9 @@ process_init (void) {
 tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
+	char file[256];
+
+	find_file_name (file_name, file);
 	tid_t tid;
 
 	/* Make a copy of FILE_NAME.
@@ -51,7 +68,7 @@ process_create_initd (const char *file_name) {
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (file, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
