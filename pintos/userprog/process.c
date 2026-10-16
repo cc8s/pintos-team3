@@ -423,7 +423,46 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	
+	char parse_str[128];
+    strlcpy(parse_str, file_name, sizeof(parse_str));
+
+	char *argv_addr[64];
+	int argc = 0;
+
+    for (token = strtok_r (parse_str, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+        int token_len = strlen (token) + 1;
+        
+        if_->rsp -= token_len;                   
+        memcpy ((void *) if_->rsp, token, token_len); 
+        
+        argv_addr[argc] = (char *) if_->rsp;
+        argc++;
+    }
+
+	/* 8바이트 정렬 */
+	if (if_->rsp % 8 != 0) {
+		if_->rsp -= (if_->rsp % 8);
+		memset ((void *) if_->rsp, 0, if_->rsp % 8); 
+	}
+
+	/* NULL */
+	if_->rsp -= 8;
+	memset ((void *) if_->rsp, 0, 8); 
+
+	for (int i = argc - 1; i >= 0; i--) {
+		if_->rsp -= 8;
+		memcpy ((void *) if_->rsp, &argv_addr[i], 8);
+	}
+
+	/* Return Address == NULL */
+	if_->rsp -= 8;
+	memset ((void *) if_->rsp, 0, 8);
+
+	if_->R.rdi = argc;                   
+	if_->R.rsi = if_->rsp + 8; // return addr 위가 argv[0]
+	//debug
+    printf("DEBUG\n");
+    hex_dump(if_->rsp, (void *)if_->rsp, USER_STACK - if_->rsp, true);
 	success = true;
 
 done:
