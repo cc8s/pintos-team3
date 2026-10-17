@@ -49,7 +49,7 @@ process_create_initd (const char *file_name) {
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
-
+	/* 입력값에서 파일 이름만 잘라서 thread_create */
 	char file_name_copy[128]; 
 	strlcpy(file_name_copy, file_name, sizeof(file_name_copy));
 
@@ -210,7 +210,7 @@ process_wait (tid_t child_tid) {
     struct thread *curr = thread_current ();
     struct thread *child = NULL;
     struct list_elem *e;
-
+	/* tid로 친자확인 */
     for (e = list_begin (&curr->children); e != list_end (&curr->children); e = list_next (e)) {
         struct thread *t = list_entry (e, struct thread, c_elem);
         if (t->tid == child_tid) {
@@ -218,13 +218,13 @@ process_wait (tid_t child_tid) {
             break;
         }
     }
-
+	/* 내 자식 아니면 return -1 */
     if (child == NULL) {
         return -1;
     }
-
+	/* 자식 process_exit 대기 */
     sema_down (&child->c_sema);
-
+	/* 자식 정보 읽어오고 process_exit 완료 허가 (sema_up) */
     int status = child->exit_status;
     list_remove (&child->c_elem);
     sema_up (&child->can_exit);
@@ -235,9 +235,8 @@ process_wait (tid_t child_tid) {
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-
     struct thread *curr = thread_current ();
-
+	/* 부모가 없어질 모든 자식 process_exit 완료 미리 허가 (sema_up) */
     while (!list_empty (&curr->children)) {
         struct list_elem *e = list_pop_front (&curr->children);
         struct thread *child = list_entry (e, struct thread, c_elem);
@@ -245,11 +244,9 @@ process_exit (void) {
     }
 
     printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
-
+	/* 부모 대기 종료 후 process_exit 완료 허가 대기 */
     sema_up (&curr->c_sema);
     sema_down (&curr->can_exit);
-
-
 }
 
 /* Free the current process's resources. */
@@ -364,7 +361,7 @@ load (const char *file_name, struct intr_frame *if_) {
  
 	if (strlen(file_name) > 128)
 		goto done;
-
+	/* 실행할 파일명 parsing */
 	char *token, *save_ptr;
 	char file_name_temp[128];
 	strlcpy(file_name_temp, file_name, sizeof(file_name_temp));
@@ -461,7 +458,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	char *argv_addr[64];
 	int argc = 0;
-
+	/* 입력값 parsing후 rsp, argv_addr[argc]에 각각 값, 주소값 저장 */
     for (token = strtok_r (parse_str, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
         int token_len = strlen (token) + 1;
         
