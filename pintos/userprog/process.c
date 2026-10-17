@@ -50,8 +50,11 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char file_name_copy[128]; 
+	strlcpy(file_name_copy, file_name, sizeof(file_name_copy));
+
 	char *save_ptr;
-	char *parsed_file_name = strtok_r (file_name, " ", &save_ptr);
+	char *parsed_file_name = strtok_r (file_name_copy, " ", &save_ptr); 
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (parsed_file_name, PRI_DEFAULT, initd, fn_copy);
@@ -204,28 +207,48 @@ process_exec (void *f_name) {
  * does nothing. */
 int
 process_wait (tid_t child_tid) {
+    struct thread *curr = thread_current ();
+    struct thread *child = NULL;
+    struct list_elem *e;
 
-	while (1) {
-		thread_yield();
-	}
-	
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	return -1;
+    for (e = list_begin (&curr->children); e != list_end (&curr->children); e = list_next (e)) {
+        struct thread *t = list_entry (e, struct thread, c_elem);
+        if (t->tid == child_tid) {
+            child = t; 
+            break;
+        }
+    }
+
+    if (child == NULL) {
+        return -1;
+    }
+
+    sema_down (&child->c_sema);
+
+    int status = child->exit_status;
+    list_remove (&child->c_elem);
+    sema_up (&child->can_exit);
+
+    return status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
 
-	printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
-	process_cleanup ();
+    struct thread *curr = thread_current ();
+
+    while (!list_empty (&curr->children)) {
+        struct list_elem *e = list_pop_front (&curr->children);
+        struct thread *child = list_entry (e, struct thread, c_elem);
+        sema_up (&child->can_exit); 
+    }
+
+    printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+
+    sema_up (&curr->c_sema);
+    sema_down (&curr->can_exit);
+
 
 }
 
@@ -444,7 +467,7 @@ load (const char *file_name, struct intr_frame *if_) {
         
         if_->rsp -= token_len;                   
         memcpy ((void *) if_->rsp, token, token_len); 
-        
+
         argv_addr[argc] = (char *) if_->rsp;
         argc++;
     }

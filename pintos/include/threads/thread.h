@@ -14,10 +14,10 @@
 //     tid_t child_tid;
 //     int exit_status;
     
-//     struct semaphore wait_sema; /* 부모 대기용 신호등 */
-//     struct semaphore exit_sema; /* 자식 종료 대기용 신호등 */
+//     struct semaphore wait_sema; 
+//     struct semaphore exit_sema; 
     
-//     struct list_elem elem;     /* 부모의 child_list에 연결될 연결 리스트 엘리먼트 */
+//     struct list_elem elem;
 // };
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -109,10 +109,10 @@ struct thread {
 	uint64_t *pml4;                     /* Page map level 4 */
 	int exit_status;						/* exit status */
 
-	// struct list children;
-	// struct list_elem c_elem;
-	// struct semaphore c_sema;
-	// struct semaphore can_exit;
+	struct list children;
+	struct list_elem c_elem;
+	struct semaphore c_sema;
+	struct semaphore can_exit;
 
 #endif
 #ifdef VM
