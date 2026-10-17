@@ -7,6 +7,7 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/init.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -39,8 +40,21 @@ syscall_init (void) {
 
 /* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+syscall_handler (struct intr_frame *f) {
+	int syscall_no = f->R.rax; /* 시스템콜번호 꺼냄(if문으로 각각 매핑) */
+
+	if (syscall_no == SYS_WRITE) {
+		int fd = f->R.rdi;
+		const char *buffer = (const char *) f->R.rsi;
+		int size = f->R.rdx;
+		if (fd == 1) {
+		putbuf (buffer, size);
+		}
+		f->R.rax = size;
+	} else if (syscall_no == SYS_EXIT) {
+		thread_current ()->exit_status = (int) f->R.rdi; /* rdi에서 종료 코드를 꺼내 현재 스레드의 필드에 저장 */
+		thread_exit ();
+	} else {
+		thread_exit ();
+	}
 }

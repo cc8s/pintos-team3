@@ -173,11 +173,58 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
+	char *argv[64];
+	int argc = 0;
+
+	char *save_ptr;    /* strtok_r이 자르다 어디서 멈췄는지 기억 */
+	char *token = strtok_r(file_name, " ", &save_ptr);
+
+	while (token != NULL) {
+		argv[argc] = token;    /* 저장 */
+		token = strtok_r(NULL, " ", &save_ptr);    /* 다음단어로 덮어씀 */
+		argc++;
+	}
+
+	strlcpy (thread_current ()->name, argv[0], sizeof thread_current ()->name); /* exit시 출력 정상화 */
+
 	/* We first kill the current context */
 	process_cleanup ();
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
+
+	if (success == true) {
+		/* argc 전달 */
+		_if.R.rdi = argc;  
+		/* argv 전달 */
+		/* 문자열을 뒤에서부터 스택에 복사 */
+		for (int i = argc - 1; i >= 0; i--) {
+			size_t len = strlen (argv[i]) + 1;
+			_if.rsp -= len;
+			memcpy ((void *) _if.rsp, argv[i], len);
+			argv[i] = (char *) _if.rsp;
+		}
+	
+		/* rsp를 8의 배수로 */
+		while (_if.rsp % 8 != 0) {
+			_if.rsp -= 1;
+			*(uint8_t *) _if.rsp = 0;
+		}
+	
+		/* argv[argc] = NULL */
+		_if.rsp -= 8;
+		*(uint64_t *) _if.rsp = 0;
+	
+		/* 포인터 배열 argv[argc-1] ~ argv[0] 순서 */
+		for (int i = argc - 1; i >= 0; i--) {
+			_if.rsp -= 8;
+			*(uint64_t *) _if.rsp = (uint64_t) argv[i];
+		}
+
+		_if.R.rsi = _if.rsp;
+		_if.rsp -= 8;
+		*(uint64_t *) _if.rsp = 0;
+	}
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -200,23 +247,36 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	return -1;
+process_wait (tid_t child_tid) {
+	struct thread *curr = thread_current ();
+	struct thread *child = NULL;
+
+	for (struct list_elem *e = list_begin (&curr->children); e != list_end (&curr->children); e = list_next (e)) {
+		struct thread *t = list_entry (e, struct thread, child_elem);
+		if (t->tid == child_tid) {
+			child = t;
+			break;
+		}
+	}
+	if (child == NULL) {
+		return -1;
+	}
+	sema_down (&child->wait_sema);		/* 부모가 자식의 종료를 대기 */
+	int status = child->exit_status;
+	list_remove (&child->child_elem);
+	sema_up (&child->exit_sema);		/* 자식에게 죽어도 된다고 알림 */
+
+	return status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
-
+	printf("%s: exit(%d)\n", thread_current ()->name, thread_current ()->exit_status);
 	process_cleanup ();
+	sema_up (&thread_current ()->wait_sema);		/* 부모 깨우기 */
+	sema_down (&thread_current ()->exit_sema);		/* 부모가 읽을때까지 sleep */
 }
 
 /* Free the current process's resources. */
