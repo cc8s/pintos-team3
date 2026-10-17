@@ -85,7 +85,11 @@ kill (struct intr_frame *f) {
 			   expected.  Kill the user process.  */
 			printf ("%s: dying due to interrupt %#04llx (%s).\n",
 					thread_name (), f->vec_no, intr_name (f->vec_no));
-			intr_dump_frame (f);
+			// intr_dump_frame (f);
+			// 아래 3줄 추가함. by 종건.
+			struct thread *cur;
+			cur = thread_current();
+			cur->exit_status = -1;
 			thread_exit ();
 
 		case SEL_KCSEG:
