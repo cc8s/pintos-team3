@@ -54,6 +54,9 @@ syscall_handler (struct intr_frame *f) {
 	} else if (syscall_no == SYS_EXIT) {
 		thread_current ()->exit_status = (int) f->R.rdi; /* rdi에서 종료 코드를 꺼내 현재 스레드의 필드에 저장 */
 		thread_exit ();
+	}
+	else if (syscall_no == SYS_HALT) {
+		power_off ();
 	} else {
 		thread_exit ();
 	}
