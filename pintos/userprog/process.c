@@ -261,6 +261,7 @@ process_exit (void) {
     }
 
     printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	process_cleanup ();
 	/* 부모 대기 종료 후 process_exit 완료 허가 대기 */
     sema_up (&curr->c_sema);
     sema_down (&curr->can_exit);
