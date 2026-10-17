@@ -8,6 +8,11 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "threads/init.h"
+//헤더 파일 추가. by 종건.
+#include "filesys/filesys.h"
+#include "threads/synch.h"
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -25,8 +30,12 @@ void syscall_handler (struct intr_frame *);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
+//lock 선언. by 종건.
+static struct lock filesys_lock;
+
 void
 syscall_init (void) {
+	lock_init(&filesys_lock);
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
@@ -59,7 +68,22 @@ write (int fd, const void *buffer, unsigned size){
 		thread_exit ();
 	}
 }
-
+//파일명 체크용 함수. by 종건.
+static bool check_user_string (uint64_t adr) {
+	struct thread *cur = thread_current();
+	while (is_user_vaddr (adr)) {
+		const char *p = (const char *) adr;
+		if (pml4_get_page (cur->pml4, p) == NULL) {
+			return false;
+		}
+		char ch = *p;
+		if (ch == '\0') {
+			return true;
+		}
+		adr++;
+	}
+	return false;
+}
 
 /* The main system call interface */
 void
@@ -82,6 +106,27 @@ syscall_handler (struct intr_frame *f) {
 			/* f->R.rdi == fd,	f->R.rsi == buffer,  f->R.rdx == size */
 			f->R.rax = write((int) f->R.rdi, (char *) f->R.rsi, (unsigned) f->R.rdx);
             break;
+
+		case SYS_CREATE:
+			//사용자 주소 검사.
+			if (!is_user_vaddr (f->R.rdi)) {
+				exit (-1);
+			}
+			
+			struct thread *cur = thread_current();
+			if (!pml4_get_page (cur->pml4, (const void *) f->R.rdi)) {
+				exit (-1);
+			}
+
+			if (check_user_string (f->R.rdi) == false) {
+				exit (-1);
+			}
+
+			//파일 생성.
+			lock_acquire (&filesys_lock);
+			f->R.rax = filesys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
+			lock_release (&filesys_lock);
+			break;
 
         default:
             exit(-1);
