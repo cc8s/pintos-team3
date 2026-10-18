@@ -31,6 +31,7 @@ enum thread_status {
    You can redefine this to whatever type you like. */
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
+#define FD_TABLE_SIZE 130             /* Standard I/O plus 128 open files. */
 
 /* Thread priorities. */
 #define PRI_MIN 0                       /* Lowest priority. */
@@ -113,6 +114,9 @@ struct thread {
 	struct list_elem c_elem;
 	struct semaphore c_sema;
 	struct semaphore can_exit;
+
+	//fd_table 용 멤버 변수 추가. 
+	struct file **fd;
 
 #endif
 #ifdef VM

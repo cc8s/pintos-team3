@@ -1,4 +1,5 @@
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -261,6 +262,7 @@ process_exit (void) {
     }
 
     printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	syscall_close_files ();
 	process_cleanup ();
 	/* 부모 대기 종료 후 process_exit 완료 허가 대기 */
     sema_up (&curr->c_sema);

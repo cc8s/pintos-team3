@@ -10,6 +10,8 @@
 #include "threads/init.h"
 //헤더 파일 추가. by 종건.
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/malloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
@@ -85,6 +87,24 @@ static bool check_user_string (uint64_t adr) {
 	return false;
 }
 
+//fd_table 연결.
+void
+syscall_close_files (void) {
+	struct thread *cur = thread_current ();
+	if (cur->fd == NULL)
+		return;
+
+	lock_acquire (&filesys_lock);
+	for (int i = 2; i < FD_TABLE_SIZE; i++) {
+		if (cur->fd[i] != NULL)
+			file_close (cur->fd[i]);
+	}
+	lock_release (&filesys_lock);
+
+	free (cur->fd);
+	cur->fd = NULL;
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f) {
@@ -107,7 +127,7 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = write((int) f->R.rdi, (char *) f->R.rsi, (unsigned) f->R.rdx);
             break;
 
-		case SYS_CREATE:
+		case SYS_CREATE: {
 			//사용자 주소 검사.
 			if (!is_user_vaddr (f->R.rdi)) {
 				exit (-1);
@@ -127,6 +147,63 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = filesys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
 			lock_release (&filesys_lock);
 			break;
+		}
+
+		case SYS_OPEN: {
+			//사용자 주소 검사. 
+			if (!is_user_vaddr (f->R.rdi)) {
+				exit (-1);
+			}
+
+			struct thread *cur = thread_current();
+			if (!pml4_get_page (cur->pml4, (const void *) f->R.rdi)) {
+				exit (-1);
+			}
+
+			if (check_user_string (f->R.rdi) == false) {
+				exit (-1);
+			}
+
+			//FD table 연결
+			struct file *file;
+			int i = 2;
+			/* Allocate once per process; later open calls reuse this table. */
+			if (cur->fd == NULL) {
+				cur->fd = calloc (FD_TABLE_SIZE, sizeof *cur->fd);
+				if (cur->fd == NULL) {
+					f->R.rax = -1;
+					break;
+				}
+			}
+
+			lock_acquire (&filesys_lock);
+			const char *p = (const char *) f->R.rdi;
+			file = filesys_open (p);
+			lock_release (&filesys_lock);
+
+			if (file == NULL) {
+				f->R.rax = -1;
+			} else {
+				while (i < FD_TABLE_SIZE && cur->fd[i] != NULL) {
+					i++;
+				}
+
+				if (i < FD_TABLE_SIZE) {
+					cur->fd[i] = file;
+					f->R.rax = i;
+				} else {
+					lock_acquire (&filesys_lock);
+					file_close (file);
+					lock_release (&filesys_lock);
+					f->R.rax = -1;
+				}
+			}
+			break;
+		}
+
+		case SYS_CLOSE: {
+
+		}
 
         default:
             exit(-1);
