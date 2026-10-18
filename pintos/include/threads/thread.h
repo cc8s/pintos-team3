@@ -107,13 +107,15 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
-	int exit_status;						/* exit status */
+	int exit_status;					/* exit status */
 
-	struct list children;
-	struct list_elem c_elem;
-	struct semaphore c_sema;
-	struct semaphore can_exit;
+	struct list children;				/* 자식 리스트 */	
+	struct list_elem c_elem;			/* list children용 elem */
+	struct semaphore c_sema;			/* 부모 대기 sema */
+	struct semaphore can_exit;			/* 종료 대기 sema */
 
+	struct file **file_list;			/* fd를 인덱스로 하는 파일 포인터 배열 */
+    int fd_idx;      					/* 다음 fd 번호 */
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

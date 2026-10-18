@@ -131,6 +131,8 @@ __do_fork (void *aux) {
 	struct intr_frame *parent_if;
 	bool succ = true;
 
+	current->file_list = palloc_get_page (PAL_ZERO);
+
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
@@ -236,14 +238,17 @@ process_wait (tid_t child_tid) {
 void
 process_exit (void) {
     struct thread *curr = thread_current ();
-	/* 부모가 없어질 모든 자식 process_exit 완료 미리 허가 (sema_up) */
+	/* 예비 고아 process_exit 완료 미리 허가 (sema_up) */
     while (!list_empty (&curr->children)) {
         struct list_elem *e = list_pop_front (&curr->children);
         struct thread *child = list_entry (e, struct thread, c_elem);
         sema_up (&child->can_exit); 
     }
 
-    printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	// if (curr->pml4 != NULL) {
+        printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+    // }
+
 	/* 부모 대기 종료 후 process_exit 완료 허가 대기 */
     sema_up (&curr->c_sema);
     sema_down (&curr->can_exit);
@@ -358,6 +363,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	/* 파일 리스트에 한 페이지 할당 */
+	t->file_list= palloc_get_page (PAL_ZERO);
  
 	if (strlen(file_name) > 128)
 		goto done;
