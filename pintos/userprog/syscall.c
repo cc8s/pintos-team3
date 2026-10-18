@@ -202,7 +202,17 @@ syscall_handler (struct intr_frame *f) {
 		}
 
 		case SYS_CLOSE: {
+			struct thread *cur = thread_current ();
+			
+			if (cur->fd == NULL || f->R.rdi >= FD_TABLE_SIZE || cur->fd[f->R.rdi] == NULL) {
+				exit (-1);
+			}
 
+			lock_acquire (&filesys_lock);
+			file_close (cur->fd[f->R.rdi]);
+			cur->fd[f->R.rdi] = NULL;
+			lock_release (&filesys_lock);
+			break;
 		}
 
         default:
