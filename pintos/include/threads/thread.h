@@ -10,15 +10,7 @@
 #include "vm/vm.h"
 #endif
 
-// struct child_element {
-//     tid_t child_tid;
-//     int exit_status;
-    
-//     struct semaphore wait_sema; 
-//     struct semaphore exit_sema; 
-    
-//     struct list_elem elem;
-// };
+
 /* States in a thread's life cycle. */
 enum thread_status {
 	THREAD_RUNNING,     /* Running thread. */
@@ -36,6 +28,14 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+struct child_status {
+    tid_t tid;                  /* 자식의 tid */
+    int exit_status;           	/* 자식의 종료 상태 (default:-1) */
+    int ref_cnt;                /* wait_sema대기 수 (default:2) */
+    struct semaphore wait_sema; /* wait()용 세마포어 */
+    struct list_elem elem;
+};
 
 /* A kernel thread or user process.
  *
@@ -107,16 +107,19 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
-	int exit_status;					/* exit status */
 
-	struct list children;				/* 자식 리스트 */	
-	struct list_elem c_elem;			/* list children용 elem */
-	struct semaphore c_sema;			/* 부모 대기 sema */
-	struct semaphore can_exit;			/* 종료 대기 sema */
+	int exit_status;					/* 종료 상태(default:-1)*/
+
+	struct list children;				/* 자식 리스트 */
+	struct child_status *child_status; 
 
 	struct file **file_list;			/* fd를 인덱스로 하는 파일 포인터 배열 */
     int fd_idx;      					/* 다음 fd 번호 */
+
+    struct intr_frame *fork_tf;			/* fork시 넘겨줄 intr_frame */
+    struct semaphore fork_sema;			/* fork 대기용 세마포어 */
 #endif
+
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;

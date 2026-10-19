@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -131,8 +132,6 @@ __do_fork (void *aux) {
 	struct intr_frame *parent_if;
 	bool succ = true;
 
-	current->file_list = palloc_get_page (PAL_ZERO);
-
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
@@ -172,6 +171,8 @@ int
 process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
+	/* 입력값 너무 길면 return -1 */
+	if (strlen(file_name) > 128) return -1;
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -181,11 +182,58 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
+	char *argv[64];
+	int argc = 0;
+
+	char *save_ptr;    /* strtok_r이 자르다 어디서 멈췄는지 기억 */
+	char *token = strtok_r(file_name, " ", &save_ptr);
+
+	while (token != NULL) {
+		argv[argc] = token;    /* 저장 */
+		token = strtok_r(NULL, " ", &save_ptr);    /* 다음단어로 덮어씀 */
+		argc++;
+	}
+
+	strlcpy (thread_current ()->name, argv[0], sizeof thread_current ()->name); /* exit시 출력 정상화 */
+
 	/* We first kill the current context */
 	process_cleanup ();
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
+
+	if (success == true) {
+		/* argc 전달 */
+		_if.R.rdi = argc;  
+		/* argv 전달 */
+		/* 문자열을 뒤에서부터 스택에 복사 */
+		for (int i = argc - 1; i >= 0; i--) {
+			size_t len = strlen (argv[i]) + 1;
+			_if.rsp -= len;
+			memcpy ((void *) _if.rsp, argv[i], len);
+			argv[i] = (char *) _if.rsp;
+		}
+	
+		/* rsp를 8의 배수로 */
+		while (_if.rsp % 8 != 0) {
+			_if.rsp -= 1;
+			*(uint8_t *) _if.rsp = 0;
+		}
+	
+		/* argv[argc] = NULL */
+		_if.rsp -= 8;
+		*(uint64_t *) _if.rsp = 0;
+	
+		/* 포인터 배열 argv[argc-1] ~ argv[0] 순서 */
+		for (int i = argc - 1; i >= 0; i--) {
+			_if.rsp -= 8;
+			*(uint64_t *) _if.rsp = (uint64_t) argv[i];
+		}
+
+		_if.R.rsi = _if.rsp;
+		_if.rsp -= 8;
+		*(uint64_t *) _if.rsp = 0;
+	}
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -209,49 +257,70 @@ process_exec (void *f_name) {
  * does nothing. */
 int
 process_wait (tid_t child_tid) {
-    struct thread *curr = thread_current ();
-    struct thread *child = NULL;
+	struct thread *curr = thread_current ();
+    struct child_status *child_status = NULL;
     struct list_elem *e;
-	/* tid로 친자확인 */
+
+    /* 자식 리스트에서 tid 검색 */
     for (e = list_begin (&curr->children); e != list_end (&curr->children); e = list_next (e)) {
-        struct thread *t = list_entry (e, struct thread, c_elem);
-        if (t->tid == child_tid) {
-            child = t; 
+        struct child_status *s = list_entry (e, struct child_status, elem);
+        if (s->tid == child_tid) {
+            child_status = s;
             break;
         }
     }
 	/* 내 자식 아니면 return -1 */
-    if (child == NULL) {
-        return -1;
-    }
+	if (child_status == NULL) {
+		return -1;
+	}
 	/* 자식 process_exit 대기 */
-    sema_down (&child->c_sema);
+	sema_down (&child_status->wait_sema);
 	/* 자식 정보 읽어오고 process_exit 완료 허가 (sema_up) */
-    int status = child->exit_status;
-    list_remove (&child->c_elem);
-    sema_up (&child->can_exit);
+	int status = child_status->exit_status;
+	list_remove (&child_status->elem);
+	/* 자식 리스트에서 지우면서 ref_cnt-- */
+    child_status->ref_cnt--;
 
-    return status;
+    /* 자식도 exit했으면 free (child_status) */
+    if (child_status->ref_cnt == 0) {
+        free (child_status);
+    }
+
+	return status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
     struct thread *curr = thread_current ();
-	/* 예비 고아 process_exit 완료 미리 허가 (sema_up) */
+	
+	printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+
+	/* 자식 리스트 비우면서 ref_cnt-- */
     while (!list_empty (&curr->children)) {
         struct list_elem *e = list_pop_front (&curr->children);
-        struct thread *child = list_entry (e, struct thread, c_elem);
-        sema_up (&child->can_exit); 
+        struct child_status *child_status = list_entry (e, struct child_status, elem);
+        
+        child_status->ref_cnt--;
+        /* 자식도 exit했으면 free (child_status) */
+        if (child_status->ref_cnt == 0) {
+            free (child_status);
+        }
     }
 
-	// if (curr->pml4 != NULL) {
-        printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
-    // }
-
-	/* 부모 대기 종료 후 process_exit 완료 허가 대기 */
-    sema_up (&curr->c_sema);
-    sema_down (&curr->can_exit);
+    if (curr->child_status != NULL) {
+        curr->child_status->exit_status = curr->exit_status;
+        /* wait중인 부모 sema_up */
+        sema_up (&curr->child_status->wait_sema);
+        
+        /* ref_cnt-- */
+        curr->child_status->ref_cnt--;
+        /* 부모도 exit했으면 free (child_status) */
+        if (curr->child_status->ref_cnt == 0) {
+            free (curr->child_status);
+        }
+    }
+    process_cleanup (); 
 }
 
 /* Free the current process's resources. */
@@ -363,17 +432,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
-	/* 파일 리스트에 한 페이지 할당 */
-	t->file_list= palloc_get_page (PAL_ZERO);
- 
-	if (strlen(file_name) > 128)
-		goto done;
-	/* 실행할 파일명 parsing */
-	char *token, *save_ptr;
-	char file_name_temp[128];
-	strlcpy(file_name_temp, file_name, sizeof(file_name_temp));
-
-	char *parsed_file_name = strtok_r (file_name_temp, " ", &save_ptr);
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -382,9 +440,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	file = filesys_open (parsed_file_name);
+	file = filesys_open (file_name);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", parsed_file_name);
+		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
@@ -396,7 +454,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", parsed_file_name);
+		printf ("load: %s: error loading executable\n", file_name);
 		goto done;
 	}
 
@@ -459,44 +517,6 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
-
-	char parse_str[128];
-    strlcpy(parse_str, file_name, sizeof(parse_str));
-
-	char *argv_addr[64];
-	int argc = 0;
-	/* 입력값 parsing후 rsp, argv_addr[argc]에 각각 값, 주소값 저장 */
-    for (token = strtok_r (parse_str, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
-        int token_len = strlen (token) + 1;
-        
-        if_->rsp -= token_len;                   
-        memcpy ((void *) if_->rsp, token, token_len); 
-
-        argv_addr[argc] = (char *) if_->rsp;
-        argc++;
-    }
-
-	/* 8바이트 정렬 */
-	if (if_->rsp % 8 != 0) {
-		if_->rsp -= (if_->rsp % 8);
-		memset ((void *) if_->rsp, 0, if_->rsp % 8); 
-	}
-
-	/* NULL */
-	if_->rsp -= 8;
-	memset ((void *) if_->rsp, 0, 8); 
-
-	for (int i = argc - 1; i >= 0; i--) {
-		if_->rsp -= 8;
-		memcpy ((void *) if_->rsp, &argv_addr[i], 8);
-	}
-
-	/* Return Address == NULL */
-	if_->rsp -= 8;
-	memset ((void *) if_->rsp, 0, 8);
-
-	if_->R.rdi = argc;                   
-	if_->R.rsi = if_->rsp + 8; // return addr 위가 argv[0]
 
 	success = true;
 

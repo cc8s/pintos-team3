@@ -78,7 +78,7 @@ halt (void) {
 	power_off();
 }
 
-/* exit_status에 종료 상테 저장 후 exit */
+/* exit_status에 종료 상태 저장 후 exit */
 void
 exit (int status) {
 	thread_current ()->exit_status = status; 
