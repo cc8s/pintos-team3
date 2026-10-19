@@ -15,6 +15,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
+#include "devices/input.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -85,6 +86,51 @@ static bool check_user_string (uint64_t adr) {
 		adr++;
 	}
 	return false;
+}
+
+//buffer page 확인. 
+void
+check_user_buffer (uint64_t buffer, uint64_t size) {
+	struct thread *curr = thread_current ();
+
+	if (size == 0) {
+		return;
+	}
+
+	int i, rest;
+	void *check_buffer = (void *) buffer;
+	unsigned check_size = (unsigned) size;
+
+	unsigned bytes_left_in_page;
+	unsigned pages_remaining = check_size;
+	unsigned pages_count;
+
+	bytes_left_in_page = PGSIZE - pg_ofs (check_buffer);
+	if (bytes_left_in_page < pages_remaining) {
+		pages_remaining -= bytes_left_in_page;
+	}
+	else {
+		pages_remaining = 0;
+	}
+
+	if ((pages_remaining % 4096) != 0) {
+		rest = 1;
+	}
+	else {
+		rest = 0;
+	}
+
+	pages_count = (pages_remaining / 4096) + rest;
+
+	for (i=0; i<=pages_count; i++) {
+		uint64_t user_buffer = (uint64_t) check_buffer;
+		uint64_t *pte = pml4e_walk (curr->pml4, user_buffer, 0);
+		if (!is_user_vaddr (check_buffer) || !pml4_get_page (curr->pml4, check_buffer) || (is_writable (pte) == 0)) {
+			exit (-1);
+		}
+		check_buffer = (char *) pg_round_down (check_buffer) + PGSIZE;
+	}
+
 }
 
 //fd_table 연결.
@@ -212,6 +258,49 @@ syscall_handler (struct intr_frame *f) {
 			file_close (cur->fd[f->R.rdi]);
 			cur->fd[f->R.rdi] = NULL;
 			lock_release (&filesys_lock);
+			break;
+		}
+
+		case SYS_READ: {
+			struct thread *cur = thread_current ();
+			
+			if (cur->fd == NULL || f->R.rdi >= FD_TABLE_SIZE || cur->fd[f->R.rdi] == NULL) {
+				exit (-1);
+			}
+
+			struct file *file = cur->fd[f->R.rdi];
+			if (cur->fd == NULL
+				|| f->R.rdi >= FD_TABLE_SIZE
+				|| cur->fd[f->R.rdi] == NULL
+				|| f->R.rdi <= 1) {
+					exit (-1);
+				}
+
+			check_user_buffer (f->R.rsi, f->R.rdx);
+			
+			lock_acquire (&filesys_lock);
+			void *buffer = (void *)f->R.rsi;
+			f->R.rax = file_read (file, buffer, f->R.rdx);
+			lock_release (&filesys_lock);
+
+			break;
+		}
+
+		case SYS_FILESIZE: {
+
+			struct thread *cur = thread_current ();
+
+			if (cur->fd == NULL || f->R.rdi >= FD_TABLE_SIZE || cur->fd[f->R.rdi] == NULL) {
+				exit (-1);
+			}
+
+			struct file *file = cur->fd[f->R.rdi];
+
+			lock_acquire (&filesys_lock);
+			off_t size = file_length (file);
+			f->R.rax = size;
+			lock_release (&filesys_lock);
+
 			break;
 		}
 
