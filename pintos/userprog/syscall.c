@@ -38,6 +38,28 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
+void
+exit_with_status (int status) {
+	thread_current ()->exit_status = status;
+	thread_exit ();
+}
+
+static void
+check_address (const void *addr) {
+	/* addr이 NULL이면 exit */
+	if (addr == NULL) {
+		exit_with_status (-1);
+	}
+	/* addr이 유저 영역이 아니면 exit */
+	else if (!is_user_vaddr (addr)) {
+		exit_with_status (-1);
+	}
+	/* addr이 매핑되지 않았으면 exit */
+	else if (pml4_get_page (thread_current ()->pml4, addr) == NULL) {
+		exit_with_status (-1);
+	}
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f) {
@@ -52,11 +74,16 @@ syscall_handler (struct intr_frame *f) {
 		}
 		f->R.rax = size;
 	} else if (syscall_no == SYS_EXIT) {
-		thread_current ()->exit_status = (int) f->R.rdi; /* rdi에서 종료 코드를 꺼내 현재 스레드의 필드에 저장 */
-		thread_exit ();
+		exit_with_status((int) f->R.rdi); /* rdi에서 종료 코드를 꺼내 현재 스레드의 필드에 저장 */
 	}
 	else if (syscall_no == SYS_HALT) {
 		power_off ();
+	} else if (syscall_no == SYS_CREATE) {
+	const char *file = (const char *) f->R.rdi;
+	unsigned initial_size = (unsigned) f->R.rsi;
+	/* 유저사이드의 잘못된 요청 check */
+	check_address (file);
+	f->R.rax = filesys_create (file, initial_size);
 	} else {
 		thread_exit ();
 	}

@@ -4,6 +4,7 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/syscall.h"
 #include "intrinsic.h"
 
 /* Number of page faults processed. */
@@ -155,6 +156,10 @@ page_fault (struct intr_frame *f) {
 			not_present ? "not present" : "rights violation",
 			write ? "writing" : "reading",
 			user ? "user" : "kernel");
+	/* 바로 kill */
+	if (user) {
+		exit_with_status (-1);
+	}
 	kill (f);
 }
 
