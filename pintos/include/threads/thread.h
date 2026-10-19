@@ -105,6 +105,8 @@ struct thread {
 	struct list_elem child_elem;	/* 부모의 자식에 끼울때 쓰는 elem */
 	struct semaphore wait_sema;		/* 자식프로세스 종료까지 부모가 대기 */
 	struct semaphore exit_sema;		/* 부모가 자식프로세스의 exit_status를 읽을때까지 대기 */
+
+	struct file *fd_table[64]; /* open 구현에 필요 */
 #endif
 
 #ifdef VM

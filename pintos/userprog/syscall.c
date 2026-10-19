@@ -73,18 +73,43 @@ syscall_handler (struct intr_frame *f) {
 		putbuf (buffer, size);
 		}
 		f->R.rax = size;
-	} else if (syscall_no == SYS_EXIT) {
+	} 
+	else if (syscall_no == SYS_EXIT) {
 		exit_with_status((int) f->R.rdi); /* rdi에서 종료 코드를 꺼내 현재 스레드의 필드에 저장 */
 	}
 	else if (syscall_no == SYS_HALT) {
 		power_off ();
-	} else if (syscall_no == SYS_CREATE) {
+	} 
+	else if (syscall_no == SYS_CREATE) {
+	
 	const char *file = (const char *) f->R.rdi;
 	unsigned initial_size = (unsigned) f->R.rsi;
 	/* 유저사이드의 잘못된 요청 check */
 	check_address (file);
 	f->R.rax = filesys_create (file, initial_size);
-	} else {
+	} 
+	else if (syscall_no == SYS_OPEN) {
+		const char *file_name = (const char *) f->R.rdi;
+		check_address (file_name);
+
+		struct file *opened = filesys_open (file_name);
+		if (opened == NULL) {
+			f->R.rax = -1;
+			return;
+		}
+
+		struct thread *cur = thread_current ();
+		for (int i = 2; i < 64; i++) {
+			if (cur->fd_table[i] == NULL) {
+				cur->fd_table[i] = opened;;
+				f->R.rax = i;
+				return;
+			}
+		}
+		file_close (opened);
+		f->R.rax = -1;
+	} 
+	else {
 		thread_exit ();
 	}
 }
