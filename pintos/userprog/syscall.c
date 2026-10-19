@@ -12,6 +12,7 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "devices/input.h"
+#include "threads/palloc.h"
 
 #include "threads/vaddr.h"
 #include "userprog/process.h"
@@ -41,8 +42,8 @@ check_address (void *addr) {
         exit (-1); 
     }
 }
-
-/* 현제 스레드에 파일 추가 */
+ 
+/* 현재 스레드에 파일 추가 */
 static int 
 process_add_file (struct file *f) {
     struct thread *curr = thread_current ();
@@ -72,21 +73,47 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-/* 종료 */
+/* 종료 */ 
 static void
 halt (void) {
 	power_off();
 }
 
-/* exit_status에 종료 상태 저장 후 exit */
+/* exit_status에 종료 상태 저장 후 exit (static 아님)*/
 void
 exit (int status) {
 	thread_current ()->exit_status = status; 
 	thread_exit ();
 }
 
+/* process_fork후 자식 tid 리턴 */
+static tid_t
+fork (const char *thread_name, struct intr_frame *f) {
+    check_address ((void *) thread_name);
+    return process_fork (thread_name, f);
+}
+
+/* exec후 return 안함 실패시 return -1 */
+static int
+exec (const char *file) {
+    check_address ((void *) file);
+    /* 인자로 받은 파일명+인자(최대128byte)을 사용하기 전에 
+     * process_exec에서 process_cleanup하는데 128바이트여도
+     * 커널에 계속 쌓인다고 생각하면 배열로 저장하기에는 위험하니 malloc */
+    char *temp = palloc_get_page (PAL_ZERO);
+    if (temp == NULL) {
+        exit (-1);
+    }
+    strlcpy (temp, file, PGSIZE);
+
+    process_exec (temp);
+     
+    /* 여기까지 왔으면 return -1 */
+    return -1;
+}
+
 /* pid종료 대기 */
-int
+static int
 wait (int pid) {
 	return process_wait(pid);
 }
@@ -246,6 +273,16 @@ syscall_handler (struct intr_frame *f) {
         case SYS_EXIT: 
 			/* f->R.rdi == status */
 			exit((int) f->R.rdi);
+            break;
+
+        case SYS_FORK:
+            /* f->R.rdi == thread_name, 레지스터 상태 f */
+            f->R.rax = fork ((const char *) f->R.rdi, f);
+            break;
+            
+        case SYS_EXEC:
+            /* f->R.rdi == char *file */
+            f->R.rax = exec ((const char *) f->R.rdi);
             break;
 			
 		case SYS_WAIT:

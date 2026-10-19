@@ -35,6 +35,9 @@ struct child_status {
     int ref_cnt;                /* wait_sema대기 수 (default:2) */
     struct semaphore wait_sema; /* wait()용 세마포어 */
     struct list_elem elem;
+
+	struct semaphore fork_sema;	/* fork 대기용 + child_status만 아는 부모가 자식을 찾는 용도 */
+    bool fork_success;			/* 성공여부 저장 */
 };
 
 /* A kernel thread or user process.
@@ -114,10 +117,7 @@ struct thread {
 	struct child_status *child_status; 
 
 	struct file **file_list;			/* fd를 인덱스로 하는 파일 포인터 배열 */
-    int fd_idx;      					/* 다음 fd 번호 */
-
-    struct intr_frame *fork_tf;			/* fork시 넘겨줄 intr_frame */
-    struct semaphore fork_sema;			/* fork 대기용 세마포어 */
+    int fd_idx;      					/* 다음 fd 번호 이거 필요함???*/
 #endif
 
 #ifdef VM
