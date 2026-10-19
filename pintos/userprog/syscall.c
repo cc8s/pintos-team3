@@ -8,6 +8,8 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "threads/init.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -108,7 +110,20 @@ syscall_handler (struct intr_frame *f) {
 		}
 		file_close (opened);
 		f->R.rax = -1;
-	} 
+	}
+	else if (syscall_no == SYS_CLOSE) {
+		int fd = (int) f->R.rdi;
+		struct thread *cur = thread_current ();
+
+		if (fd < 2 || fd >= 64) {
+			return;
+		}
+		else if (cur->fd_table[fd] == NULL) {
+			return;
+		}
+		file_close (cur->fd_table[fd]);
+		cur->fd_table[fd] = NULL;
+	}
 	else {
 		thread_exit ();
 	}
