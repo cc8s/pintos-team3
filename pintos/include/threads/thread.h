@@ -118,6 +118,7 @@ struct thread {
 
     struct file **file_list;    		/* 파일 포인터 배열을 가리킬 포인터 */
     int fd_capacity;            		/* file_list의 capacity */
+	struct file *running_file; 			/* 현재 실행 중인 파일 */
 #endif
 
 #ifdef VM

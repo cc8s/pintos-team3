@@ -204,16 +204,18 @@ __do_fork (void *aux) {
         current->file_list = malloc (sizeof(struct file *) * current->fd_capacity);
         if (current->file_list == NULL) goto error;
 
-        /* 초기화 */
-        for (int i = 0; i < current->fd_capacity; i++) {
-            current->file_list[i] = NULL;
-        }
+        /* fd 0, 1 초기화 */
+		current->file_list[0] = NULL;
+		current->file_list[1] = NULL;
 
         for (int i = 2; i < parent->fd_capacity; i++) {
             struct file *f = parent->file_list[i];
             if (f != NULL) {
                 current->file_list[i] = file_duplicate (f);
             }
+			else{
+				current->file_list[i] = NULL;
+			}
         }
     }
 
@@ -357,10 +359,14 @@ process_wait (tid_t child_tid) {
 	return status;
 }
 
-/* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
+
+    /* 파일 쓰기 잠금 해제 */
+    if (curr->running_file != NULL) {
+        file_close (curr->running_file);
+    }
 
 	/* 열었던 파일 free */
 	if (curr->file_list != NULL) {
@@ -524,6 +530,10 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	}
 
+    /* 파일 쓰기 잠금, 스레드에 저장 */
+    file_deny_write (file);
+    thread_current ()->running_file = file;
+
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
@@ -600,7 +610,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	//file_close (file);
 	return success;
 }
 

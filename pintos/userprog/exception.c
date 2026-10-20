@@ -119,7 +119,6 @@ kill (struct intr_frame *f) {
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
 static void
 page_fault (struct intr_frame *f) {
-	/* Determine cause. */
 	bool not_present = (f->error_code & PF_P) == 0;
 	bool write = (f->error_code & PF_W) != 0;
 	bool user = (f->error_code & PF_U) != 0;
@@ -127,7 +126,7 @@ page_fault (struct intr_frame *f) {
 	
 	/* user모드에서의 page_fault면 */
     if (user) {
-        exit (-1);
+        sys_exit (-1);
     }
 	/* Obtain faulting address, the virtual address that was
 	   accessed to cause the fault.  It may point to code or to
