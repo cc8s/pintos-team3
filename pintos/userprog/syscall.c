@@ -68,13 +68,20 @@ syscall_handler (struct intr_frame *f) {
 	int syscall_no = f->R.rax; /* 시스템콜번호 꺼냄(if문으로 각각 매핑) */
 
 	if (syscall_no == SYS_WRITE) {
+		struct thread *cur = thread_current ();
 		int fd = f->R.rdi;
 		const char *buffer = (const char *) f->R.rsi;
 		int size = f->R.rdx;
+		check_address (buffer);
+
 		if (fd == 1) {
-		putbuf (buffer, size);
+			putbuf (buffer, size);
 		}
-		f->R.rax = size;
+		if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
+			f->R.rax = -1;
+			return;
+		}
+		f->R.rax = file_write (cur->fd_table[fd], buffer, size);
 	} 
 	else if (syscall_no == SYS_EXIT) {
 		exit_with_status((int) f->R.rdi); /* rdi에서 종료 코드를 꺼내 현재 스레드의 필드에 저장 */
@@ -123,6 +130,30 @@ syscall_handler (struct intr_frame *f) {
 		}
 		file_close (cur->fd_table[fd]);
 		cur->fd_table[fd] = NULL;
+	}
+	else if (syscall_no == SYS_READ) {
+		struct thread *cur = thread_current ();
+		int fd = f->R.rdi;
+		const char *buffer = (const char *) f->R.rsi;
+		int size = f->R.rdx;
+		
+		if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
+			f->R.rax = -1;
+			return;
+		}
+		check_address (buffer);
+
+		f->R.rax = file_read (cur->fd_table[fd], buffer, size);
+	}
+	else if (syscall_no == SYS_FILESIZE) {
+	struct thread *cur = thread_current ();
+	int fd = (int) f->R.rdi;
+
+	if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
+		f->R.rax = -1;
+		return;
+	}
+	f->R.rax = file_length (cur->fd_table[fd]);
 	}
 	else {
 		thread_exit ();
