@@ -116,8 +116,8 @@ struct thread {
 	struct list children;				/* 자식 리스트 */
 	struct child_status *child_status; 
 
-	struct file **file_list;			/* fd를 인덱스로 하는 파일 포인터 배열 */
-    int fd_idx;      					/* 다음 fd 번호 이거 필요함???*/
+    struct file **file_list;    		/* 파일 포인터 배열을 가리킬 포인터 */
+    int fd_capacity;            		/* file_list의 capacity */
 #endif
 
 #ifdef VM

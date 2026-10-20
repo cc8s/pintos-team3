@@ -195,11 +195,6 @@ thread_create (const char *name, int priority,
 	tid = t->tid = allocate_tid ();
 
 #ifdef USERPROG
-	t->file_list = palloc_get_page (PAL_ZERO);
-    if (t->file_list == NULL) {
-        palloc_free_page (t);
-        return TID_ERROR;
-    }
 
     struct child_status *status = malloc (sizeof (struct child_status));
     if (status == NULL) {
@@ -440,10 +435,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->pml4 = NULL; 
 
 	list_init (&t->children);
-
-	/* 파일 리스트에 한 페이지 할당 */
-	t->file_list= NULL; 
-    t->fd_idx = 2;
+	t->fd_capacity = 0;
+	t->file_list = NULL;
 
 	t->exit_status = -1;
 #endif

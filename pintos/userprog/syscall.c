@@ -16,7 +16,7 @@
 
 #include "threads/vaddr.h"
 #include "userprog/process.h"
-
+#include "threads/malloc.h"
 struct lock file_lock;
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -42,21 +42,53 @@ check_address (void *addr) {
         exit (-1); 
     }
 }
- 
+
 /* 현재 스레드에 파일 추가 */
 static int 
 process_add_file (struct file *f) {
     struct thread *curr = thread_current ();
     struct file **fl = curr->file_list;
-
-    for (int i = 2; i < 512; i++) {
-        if (fl[i] == NULL) {
-            fl[i] = f;
-            return i;
+    /* 첫 할당 시 */
+    if (curr->file_list == NULL) {
+        curr->fd_capacity = 16;
+        curr->file_list = malloc (sizeof(struct file *) * curr->fd_capacity);
+        
+        if (curr->file_list == NULL) {
+            return -1; 
+        }
+        /* 초기화 */
+        for (int i = 0; i < curr->fd_capacity; i++) {
+            curr->file_list[i] = NULL;
         }
     }
 
-    return -1; 
+    /* 빈자리 탐색 */
+    for (int i = 2; i < curr->fd_capacity; i++) {
+        if (curr->file_list[i] == NULL) {
+            curr->file_list[i] = f;
+            return i;
+        }
+    }
+    /* 꽉차면 (배열 크기 * 2) */
+    int old_cap = curr->fd_capacity;
+    int new_cap = old_cap * 2;
+
+    struct file **new_list = realloc (curr->file_list, sizeof(struct file *) * new_cap);
+    if (new_list == NULL) {
+        return -1; 
+    }
+
+    /* 초기화 */
+    for (int i = old_cap; i < new_cap; i++) {
+        new_list[i] = NULL;
+    }
+
+    curr->file_list = new_list;
+    curr->fd_capacity = new_cap;
+
+    /* 새로 받은자리에 할당 */
+    curr->file_list[old_cap] = f;
+    return old_cap;
 }
 
 void
@@ -164,8 +196,9 @@ open (const char *file){
 
 /* file 바이트 반환(file_length) */
 static int
-filesize (int fd) {    
-    if (fd < 2 || fd >= 512) { 
+filesize (int fd) {
+    struct thread *curr = thread_current ();
+    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity) { 
         return -1;
     }
     
@@ -198,7 +231,7 @@ read (int fd, void *buffer, unsigned size) {
     }
 
     struct thread *curr = thread_current ();
-    if (fd < 2 || fd >= 512 || curr->file_list[fd] == NULL) {
+    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return -1;
     }
 
@@ -227,7 +260,7 @@ write (int fd, const void *buffer, unsigned size) {
     }
 
     struct thread *curr = thread_current ();
-    if (fd < 2 || fd >= 512 || curr->file_list[fd] == NULL) {
+    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return 0;
     }
 
@@ -242,8 +275,8 @@ write (int fd, const void *buffer, unsigned size) {
 static void
 close (int fd) {
     struct thread *curr = thread_current ();
-    
-    if (fd < 2 || fd >= 512) {
+
+    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity) {
         return; 
     }
 

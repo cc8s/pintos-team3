@@ -198,12 +198,22 @@ __do_fork (void *aux) {
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
-
 	/* 부모 parent->file_list 복사 */
-    for (int i = 2; i < 512; i++) {
-        struct file *f = parent->file_list[i];
-        if (f != NULL) {
-            current->file_list[i] = file_duplicate (f);
+    if (parent->file_list != NULL) {
+        current->fd_capacity = parent->fd_capacity;
+        current->file_list = malloc (sizeof(struct file *) * current->fd_capacity);
+        if (current->file_list == NULL) goto error;
+
+        /* 초기화 */
+        for (int i = 0; i < current->fd_capacity; i++) {
+            current->file_list[i] = NULL;
+        }
+
+        for (int i = 2; i < parent->fd_capacity; i++) {
+            struct file *f = parent->file_list[i];
+            if (f != NULL) {
+                current->file_list[i] = file_duplicate (f);
+            }
         }
     }
 
@@ -350,7 +360,17 @@ process_wait (tid_t child_tid) {
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-    struct thread *curr = thread_current ();
+	struct thread *curr = thread_current ();
+
+	/* 열었던 파일 free */
+	if (curr->file_list != NULL) {
+		for (int i = 2; i < curr->fd_capacity; i++) {
+			if (curr->file_list[i] != NULL) {
+				file_close (curr->file_list[i]);
+			}
+		}
+		free (curr->file_list);
+	}
 
 	printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
 
