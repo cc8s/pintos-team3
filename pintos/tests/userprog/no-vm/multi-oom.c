@@ -52,11 +52,12 @@ consume_some_resources (void)
   for (fd = 0; fd < fdmax; fd++) {
 #ifdef EXTRA2
 	  if (fd != 0 && (random_ulong () & 1)) {
-		if (dup2(random_ulong () % fd, fd+fdmax) == -1)
-			break;
-		else
-			if (open (test_name) == -1)
-			  break;
+      //msg ("DUP2 (oldfd: %d, newfd: %d)", random_ulong () % fd, fd+fdmax);
+      if (dup2(random_ulong () % fd, fd+fdmax) == -1)
+        break;
+      else
+        if (open (test_name) == -1)
+          break;
 	  }
 #else
 		if (open (test_name) == -1)
