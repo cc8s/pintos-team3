@@ -50,8 +50,14 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char thread_name[16];
+	strlcpy (thread_name, file_name, sizeof thread_name); /* 전체복사&15자 초과시 날림 */
+
+	char *save_ptr;
+	strtok_r (thread_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (thread_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -223,7 +229,7 @@ process_exec (void *f_name) {
 		argc++;
 	}
 
-	strlcpy (thread_current ()->name, argv[0], sizeof thread_current ()->name); /* exit시 출력 정상화 */
+	// strlcpy (thread_current ()->name, argv[0], sizeof thread_current ()->name); /* exit시 출력 정상화 */
 
 	/* We first kill the current context */
 	process_cleanup ();

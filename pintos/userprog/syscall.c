@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
+#include "threads/palloc.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
@@ -163,6 +164,18 @@ syscall_handler (struct intr_frame *f) {
 	else if (syscall_no == SYS_WAIT) {
 		tid_t child_tid = f->R.rdi;
 		f->R.rax = process_wait (child_tid);
+	}
+	else if (syscall_no == SYS_EXEC) {
+		const char *cmd_line = (const char *) f->R.rdi;
+		check_address (cmd_line);
+		char *cmd_copy = palloc_get_page (0);
+
+		if (cmd_copy == NULL) {
+			exit_with_status (-1);
+		}
+		strlcpy (cmd_copy, cmd_line, PGSIZE);
+		process_exec (cmd_copy);
+		exit_with_status (-1);
 	}
 
 	/* TODO: SYS_SEEK, SYS_TELL, SYS_REMOVE 시스템콜 테스트에 없으나 project3에 필요 */
