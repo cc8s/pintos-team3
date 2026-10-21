@@ -1,0 +1,4 @@
+{
+    "test": "dup2/dup2-complex",
+    "icount": "shift=8,align=off,sleep=off"
+}

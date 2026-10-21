@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -85,7 +86,7 @@ kill (struct intr_frame *f) {
 			   expected.  Kill the user process.  */
 			printf ("%s: dying due to interrupt %#04llx (%s).\n",
 					thread_name (), f->vec_no, intr_name (f->vec_no));
-			intr_dump_frame (f);
+			intr_dump_frame (f); 
 			thread_exit ();
 
 		case SEL_KCSEG:
@@ -118,11 +119,15 @@ kill (struct intr_frame *f) {
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
 static void
 page_fault (struct intr_frame *f) {
-	bool not_present;  /* True: not-present page, false: writing r/o page. */
-	bool write;        /* True: access was write, false: access was read. */
-	bool user;         /* True: access by user, false: access by kernel. */
+	bool not_present = (f->error_code & PF_P) == 0;
+	bool write = (f->error_code & PF_W) != 0;
+	bool user = (f->error_code & PF_U) != 0;
 	void *fault_addr;  /* Fault address. */
-
+	
+	/* user모드에서의 page_fault면 */
+    if (user) {
+        sys_exit (-1);
+    }
 	/* Obtain faulting address, the virtual address that was
 	   accessed to cause the fault.  It may point to code or to
 	   data.  It is not necessarily the address of the instruction
@@ -133,12 +138,6 @@ page_fault (struct intr_frame *f) {
 	/* Turn interrupts back on (they were only off so that we could
 	   be assured of reading CR2 before it changed). */
 	intr_enable ();
-
-
-	/* Determine cause. */
-	not_present = (f->error_code & PF_P) == 0;
-	write = (f->error_code & PF_W) != 0;
-	user = (f->error_code & PF_U) != 0;
 
 #ifdef VM
 	/* For project 3 and later. */
