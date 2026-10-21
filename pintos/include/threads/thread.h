@@ -112,6 +112,7 @@ struct thread {
 	struct semaphore fork_sema;		/* 부모가 자식의 복제 완료 대기 */
 	bool fork_ok;		/* 자식이 복제에 성공했는지 */
 
+	struct file *running_file; /* 현재 실행 중인 실행 파일 (rox: 프로세스 종료까지 열어둠 */
 #endif
 
 #ifdef VM

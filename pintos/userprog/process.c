@@ -189,6 +189,12 @@ __do_fork (void *aux) {
 			}
 		} 
 	}
+	if (parent->running_file != NULL) {
+		current->running_file = file_duplicate (parent->running_file);
+		if (current->running_file == NULL) {
+			goto error;
+		}
+	}
 	process_init ();
 
 	/* Finally, switch to the newly created process. */
@@ -344,6 +350,10 @@ static void
 process_cleanup (void) {
 	struct thread *curr = thread_current ();
 
+	if (curr->running_file != NULL) {
+		file_close (curr->running_file);
+		curr->running_file = NULL;
+	}
 #ifdef VM
 	supplemental_page_table_kill (&curr->spt);
 #endif
@@ -461,6 +471,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
+	file_deny_write (file);
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -541,7 +552,12 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	if (success == true) {
+		t->running_file = file;
+	}
+	if (success == false) {
+		file_close (file);
+	}
 	return success;
 }
 
