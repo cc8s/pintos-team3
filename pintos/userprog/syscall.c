@@ -177,8 +177,31 @@ syscall_handler (struct intr_frame *f) {
 		process_exec (cmd_copy);
 		exit_with_status (-1);
 	}
+	else if (syscall_no == SYS_SEEK) {
+		int fd = (int) f->R.rdi;
+		unsigned position = (unsigned) f->R.rsi; 
+		struct thread *cur = thread_current ();
 
-	/* TODO: SYS_SEEK, SYS_TELL, SYS_REMOVE 시스템콜 테스트에 없으나 project3에 필요 */
+		if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
+			return;
+		}
+		file_seek (cur->fd_table[fd], position);
+	}
+	else if (syscall_no == SYS_TELL) {
+		int fd = (int) f->R.rdi;
+		struct thread *cur = thread_current ();
+
+		if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
+			f->R.rax = -1;
+			return;
+		}
+		f->R.rax = file_tell (cur->fd_table[fd]);
+	}
+	else if (syscall_no == SYS_REMOVE) {
+		const char *file = (const char *) f->R.rdi;
+		check_address(file);
+		f->R.rax = filesys_remove (file);
+	}
 	else {
 		thread_exit ();
 	}
