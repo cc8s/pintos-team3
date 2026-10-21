@@ -24,6 +24,9 @@ void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 void sys_exit (int status);
 
+#define STDIN_FILE ((struct file *) 1)
+#define STDOUT_FILE ((struct file *) 2)
+
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -37,6 +40,74 @@ void sys_exit (int status);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
+/* 파일 리스트 초기화 */
+static void
+init_file_list (struct thread *curr) {
+    if (curr->file_list == NULL) {
+        curr->fd_capacity = 16;
+        curr->file_list = malloc (sizeof(struct file *) * curr->fd_capacity);
+        if (curr->file_list != NULL) {
+            curr->file_list[0] = STDIN_FILE;
+            curr->file_list[1] = STDOUT_FILE;
+            for (int i = 2; i < curr->fd_capacity; i++) {
+                curr->file_list[i] = NULL;
+            }
+        }
+    }
+}
+/* 열린 file count 함수 */
+static int
+count_file_ref (struct thread *curr, struct file *f) {
+    int count = 0;
+    if (curr->file_list == NULL || f == NULL || f == STDIN_FILE || f == STDOUT_FILE)
+        return 0;
+    for (int i = 0; i < curr->fd_capacity; i++) {
+        if (curr->file_list[i] == f)
+            count++;
+    }
+    return count;
+}
+
+/* 부모 file_list 복사 함수 */
+bool 
+sys_copy_file_list (struct thread *child, struct thread *parent) {
+    if (parent->file_list == NULL) {
+        child->file_list = NULL;
+        return true;
+    }
+
+    child->fd_capacity = parent->fd_capacity;
+    child->file_list = malloc (sizeof(struct file *) * child->fd_capacity);
+    if (child->file_list == NULL) return false;
+
+    for (int i = 0; i < parent->fd_capacity; i++) {
+        struct file *f = parent->file_list[i];
+        if (f == STDIN_FILE) {
+            child->file_list[i] = STDIN_FILE;
+        } else if (f == STDOUT_FILE) {
+            child->file_list[i] = STDOUT_FILE;
+        } else if (f != NULL) {
+            lock_acquire (&file_lock);
+            child->file_list[i] = file_duplicate (f);
+            lock_release (&file_lock);
+        } else {
+            child->file_list[i] = NULL;
+        }
+    }
+
+    return true;
+}
+
+void 
+sys_file_lock_acquire (void) {
+    lock_acquire (&file_lock);
+}
+
+void 
+sys_file_lock_release (void) {
+    lock_release (&file_lock);
+}
+
 /* 주소 == NULL or 유저영역 X or 페이지 테이블(pml4)연결 확인  */
 static void 
 check_address (void *addr) {
@@ -45,23 +116,17 @@ check_address (void *addr) {
     }
 }
 
+
 /* 현재 스레드에 파일 추가 */
 static int 
 process_add_file (struct file *f) {
     struct thread *curr = thread_current ();
-    
+
     /* 첫 할당 시 */
+    init_file_list(curr);
+
     if (curr->file_list == NULL) {
-        curr->fd_capacity = 16;
-        curr->file_list = malloc (sizeof(struct file *) * curr->fd_capacity);
-        
-        if (curr->file_list == NULL) {
-            return -1; 
-        }
-        /* 초기화 */
-        for (int i = 0; i < curr->fd_capacity; i++) {
-            curr->file_list[i] = NULL;
-        }
+        return -1;
     }
 
     /* 빈자리 탐색 */
@@ -91,7 +156,7 @@ process_add_file (struct file *f) {
     /* 새로 받은자리에 할당 */
     curr->file_list[old_cap] = f;
     return old_cap;
-}
+} 
 
 void
 syscall_init (void) {
@@ -191,7 +256,9 @@ sys_open (const char *file){
     int fd = process_add_file (curr_file);
 
     if (fd == -1) {
+        lock_acquire(&file_lock);
         file_close (curr_file);
+        lock_release(&file_lock);
     }
 	
     return fd;
@@ -201,40 +268,56 @@ sys_open (const char *file){
 static int
 sys_filesize (int fd) {
     struct thread *curr = thread_current ();
-    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity) { 
+    if (fd < 0 || curr->file_list == NULL || fd >= curr->fd_capacity) { 
         return -1;
     }
     
     struct file *f = thread_current ()->file_list[fd]; 
-    if (f == NULL) {
+    if (f == NULL || f == STDIN_FILE || f == STDOUT_FILE) {
         return -1;
     }
+
+    lock_acquire(&file_lock);
+    int length = file_length (f);
+    lock_release(&file_lock);
     
-    return file_length (f);
+    return length;
 }
 
 /* file 데이터 read */
 static int
 sys_read (int fd, void *buffer, unsigned size) {
-	check_address ((void *) buffer);
-    if (fd == 1) {
+    check_address ((void *) buffer);
+    struct thread *curr = thread_current ();
+
+    init_file_list (curr);
+
+    /* fd 유효성 check */
+    if (fd < 0 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
+        return -1;
+    }
+    if (curr->file_list[fd] == STDOUT_FILE) {
         return -1;
     }
 
-    if (fd == 0) {
+    /* fd == 0이고 file_list[0]에 파일이 없으면 */
+    if (curr->file_list[fd] == STDIN_FILE) {
         unsigned int i;
         unsigned char *buf = (unsigned char *) buffer;
         for (i = 0; i < size; i++) {
-            buf[i] = input_getc ();
-            if (buf[i] == '\0') {
+            char c = input_getc ();
+            if (c == '\0' || c == '\r' || c == '\n') {
+                buf[i] = c;
+                i++;
                 break;
             }
+            buf[i] = c;
         }
         return i;
     }
-
-    struct thread *curr = thread_current ();
-    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
+    
+    /* 멀쩡하면 파일 읽기 */
+    if (curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return -1;
     }
 
@@ -245,25 +328,33 @@ sys_read (int fd, void *buffer, unsigned size) {
     return size_read;
 }
 
-
 /* file에 데이터 write */
 static int
 sys_write (int fd, const void *buffer, unsigned size) {
-	check_address ((void *) buffer);
-    if (fd == 0) {
+    check_address ((void *) buffer);
+    struct thread *curr = thread_current ();
+    
+    init_file_list (curr);
+
+    /* fd 유효성 check */
+    if (fd < 0 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
+        return 0;
+    }
+    if (curr->file_list[fd] == STDIN_FILE) {
         return 0;
     }
 
-    if (fd == 1) {
-		if (size > 0){
-			putbuf (buffer, size);
-			return size;
-		}
-		return 0;
+    /* fd == 1이고 file_list[1]에 파일이 없으면 */
+    if (curr->file_list[fd] == STDOUT_FILE) {
+        if (size > 0) {
+            putbuf (buffer, size);
+            return size;
+        }
+        return 0;
     }
 
-    struct thread *curr = thread_current ();
-    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
+    /* 멀쩡하면 파일에 쓰기 */
+    if (curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return 0;
     }
 
@@ -278,9 +369,15 @@ sys_write (int fd, const void *buffer, unsigned size) {
 static void
 sys_seek (int fd, unsigned position) {
     struct thread *curr = thread_current ();
-    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
+    if (fd < 0 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return;
     }
+
+    struct file *f = curr->file_list[fd]; 
+    if (f == NULL || f == STDIN_FILE || f == STDOUT_FILE) {
+        return;
+    }
+
     lock_acquire(&file_lock);
     file_seek (curr->file_list[fd], position);
     lock_release(&file_lock);
@@ -290,9 +387,15 @@ sys_seek (int fd, unsigned position) {
 static unsigned
 sys_tell (int fd) {
     struct thread *curr = thread_current ();
-    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
+    if (fd < 0 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return 0;
     }
+
+    struct file *f = curr->file_list[fd]; 
+    if (f == NULL || f == STDIN_FILE || f == STDOUT_FILE) {
+        return -1;
+    }
+
     lock_acquire(&file_lock);
     unsigned pos = file_tell (curr->file_list[fd]);
     lock_release(&file_lock);
@@ -304,19 +407,68 @@ static void
 sys_close (int fd) {
     struct thread *curr = thread_current ();
 
-    if (fd < 2 || curr->file_list == NULL || fd >= curr->fd_capacity) {
+    if (fd < 0 || curr->file_list == NULL || fd >= curr->fd_capacity || curr->file_list[fd] == NULL) {
         return; 
     }
 
     struct file *curr_file = curr->file_list[fd];
     
-    if (curr_file != NULL) {
+    if (curr_file != STDIN_FILE && curr_file != STDOUT_FILE) {
         lock_acquire(&file_lock);
-        file_close (curr_file);
+        if (count_file_ref (curr, curr_file) == 1) {
+            file_close (curr_file);
+        }
         lock_release(&file_lock);
-
-        curr->file_list[fd] = NULL; 
     }
+    curr->file_list[fd] = NULL;
+}
+
+/* oldfd의 파일을 newfd에 연결 */
+static int
+sys_dup2 (int oldfd, int newfd) {
+    struct thread *curr = thread_current ();
+    init_file_list (curr);
+
+    /* oldfd, newfd 유효성 검사 */
+    if (oldfd < 0 || curr->file_list == NULL || oldfd >= curr->fd_capacity || curr->file_list[oldfd] == NULL) {
+        return -1; 
+    }
+    if (newfd < 0) return -1;
+    if (oldfd == newfd) return newfd;
+
+    /* newfd >= capacity이면 realloc */
+    if (newfd >= curr->fd_capacity) {
+        int old_cap = curr->fd_capacity;
+        
+        int new_cap = (old_cap * 2 > newfd + 1) ? (old_cap * 2) : (newfd + 1);
+
+        struct file **new_list = realloc (curr->file_list, sizeof(struct file *) * new_cap);
+        if (new_list == NULL) return -1;
+
+        for (int i = old_cap; i < new_cap; i++) {
+            new_list[i] = NULL;
+        }
+
+        curr->file_list = new_list;
+        curr->fd_capacity = new_cap;
+    }
+
+    struct file *old_f = curr->file_list[oldfd];
+    struct file *new_f = curr->file_list[newfd];
+
+    /* newfd에 파일이 있고, 더 이상 참조하는 fd가 없으면 close */
+    if (new_f != NULL && new_f != STDIN_FILE && new_f != STDOUT_FILE) {
+        if (count_file_ref (curr, new_f) == 1) {
+            lock_acquire (&file_lock);
+            file_close (new_f);
+            lock_release (&file_lock);
+        }
+    }
+
+    /* 포인터 연결 (오프셋 공유) */
+    curr->file_list[newfd] = old_f;
+
+    return newfd;
 }
 
 /* The main system call interface */
@@ -396,6 +548,10 @@ syscall_handler (struct intr_frame *f) {
 			sys_close ((int) f->R.rdi);
 			break;
 
+        case SYS_DUP2:
+            /* f->R.rdi == oldfd, f->R.rsi == newfd */
+            f->R.rax = sys_dup2 ((int) f->R.rdi, (int) f->R.rsi);
+            break;
         default:
             sys_exit(-1);
             break;

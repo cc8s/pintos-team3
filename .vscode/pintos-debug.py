@@ -77,10 +77,18 @@ def start_debug(root, build, output_dir, test, icount=None):
     test_path.with_suffix(".result").unlink(missing_ok=True)
     # QEMU writes straight to disk so the post-debug task can check the output
     # even if the debug adapter terminates this launcher as soon as QEMU exits.
-    kernel_args = ["-q", "-f", "run", test]
+    test_name = Path(test).name  # 경로에서 순수 실행 파일명만 추출 (예: dup2-complex)
+    kernel_args = ["-q", "-f", "run", test_name]
     pintos_args = [sys.executable, str(root / "pintos/utils/pintos"),
                    "--gdb", "-m", "20", "--fs-disk=10",
-                   "-p", f"{get_test_path(test)}:{test}"]
+                   "-p", f"{get_test_path(test)}:{test_name}"]
+
+    # sample.txt 파일이 필요한 테스트(dup2 등)를 위한 -p 옵션 자동 추가
+    sample_file = get_test_path(test).parent / "sample.txt"
+    if not (root / "pintos" / sample_file).exists():
+        sample_file = Path("tests/userprog/sample.txt")
+    if (root / "pintos" / sample_file).exists():
+        pintos_args.extend(["-p", f"{sample_file}:sample.txt"])
     if icount is not None:
         pintos_args.extend(["--icount", icount])
     with test_path.with_suffix(".output").open("w") as output, \
@@ -158,7 +166,7 @@ def main():
             except (OSError, ValueError, KeyError, TypeError) as error:
                 parser.error(f"Cannot read test setting from {config}: {error}")
     # Restrict the argument to a known userprog test before creating output files.
-    if not isinstance(args.test, str) or "/" in args.test or "\\" in args.test or not (
+    if not isinstance(args.test, str) or not (
         root / "pintos" / get_test_path(args.test).with_suffix(".ck")
     ).is_file():
         parser.error(f"Unknown userprog test: {args.test}")

@@ -19,9 +19,14 @@
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 #include "threads/malloc.h"
+
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
+
+#define STDIN_FILE ((struct file *) 1)
+#define STDOUT_FILE ((struct file *) 2)
 
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
@@ -198,25 +203,10 @@ __do_fork (void *aux) {
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
+
 	/* 부모 parent->file_list 복사 */
-    if (parent->file_list != NULL) {
-        current->fd_capacity = parent->fd_capacity;
-        current->file_list = malloc (sizeof(struct file *) * current->fd_capacity);
-        if (current->file_list == NULL) goto error;
-
-        /* fd 0, 1 초기화 */
-		current->file_list[0] = NULL;
-		current->file_list[1] = NULL;
-
-        for (int i = 2; i < parent->fd_capacity; i++) {
-            struct file *f = parent->file_list[i];
-            if (f != NULL) {
-                current->file_list[i] = file_duplicate (f);
-            }
-			else{
-				current->file_list[i] = NULL;
-			}
-        }
+    if (!sys_copy_file_list (current, parent)) {
+        goto error;
     }
 
 	process_init ();
@@ -229,8 +219,9 @@ __do_fork (void *aux) {
 	if (succ)
 		do_iret (&if_);
 error:
+
     /* fork_success = true 후 부모 대기용 sema_up */
-    current->child_status->fork_success = true;
+    current->child_status->fork_success = false;
     sema_up (&current->child_status->fork_sema);
 	thread_exit ();
 }
@@ -242,7 +233,10 @@ process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
 	/* 입력값 너무 길면 return -1 */
-	if (strlen(file_name) > 128) return -1;
+	if (strlen(file_name) > 128) {
+        palloc_free_page (f_name);
+        return -1;
+    }
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -365,18 +359,35 @@ process_exit (void) {
 
     /* 파일 쓰기 잠금 해제 */
     if (curr->running_file != NULL) {
+		sys_file_lock_acquire ();
         file_close (curr->running_file);
+		sys_file_lock_release ();
     }
 
-	/* 열었던 파일 free */
-	if (curr->file_list != NULL) {
-		for (int i = 2; i < curr->fd_capacity; i++) {
-			if (curr->file_list[i] != NULL) {
-				file_close (curr->file_list[i]);
-			}
-		}
-		free (curr->file_list);
-	}
+	/* 열었던 파일 free (중복 포인터 NULL) */
+    if (curr->file_list != NULL) {
+
+        for (int i = 0; i < curr->fd_capacity; i++) {
+            struct file *f = curr->file_list[i];
+
+            if (f != NULL && f != STDIN_FILE && f != STDOUT_FILE) {
+				sys_file_lock_acquire ();
+                file_close (f);
+				sys_file_lock_release ();
+
+                /* (중복 포인터 NULL) */
+                for (int j = i + 1; j < curr->fd_capacity; j++) {
+                    if (curr->file_list[j] == f) {
+                        curr->file_list[j] = NULL;
+                    }
+                }
+            }
+            curr->file_list[i] = NULL; /* 자기 자신도 NULL로 초기화 */
+        }
+
+        free (curr->file_list);
+        curr->file_list = NULL;
+    }
 
 	printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
 
@@ -524,12 +535,15 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
+	sys_file_lock_acquire ();
 	file = filesys_open (file_name);
+	sys_file_lock_release ();
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
+	sys_file_lock_acquire ();
     /* 파일 쓰기 잠금, 스레드에 저장 */
     file_deny_write (file);
     thread_current ()->running_file = file;
@@ -543,20 +557,33 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
 		printf ("load: %s: error loading executable\n", file_name);
+		sys_file_lock_release ();
 		goto done;
 	}
+	sys_file_lock_release ();
 
 	/* Read program headers. */
 	file_ofs = ehdr.e_phoff;
+
+	sys_file_lock_acquire ();
+	off_t f_len = file_length (file); 
+	sys_file_lock_release ();	
+ 
 	for (i = 0; i < ehdr.e_phnum; i++) {
 		struct Phdr phdr;
 
-		if (file_ofs < 0 || file_ofs > file_length (file))
+		if (file_ofs < 0 || file_ofs > f_len){
 			goto done;
+		}
+		sys_file_lock_acquire ();
 		file_seek (file, file_ofs);
 
-		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
+		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr){
+			sys_file_lock_release ();
 			goto done;
+		}
+		sys_file_lock_release ();
+
 		file_ofs += sizeof phdr;
 		switch (phdr.p_type) {
 			case PT_NULL:
@@ -590,18 +617,21 @@ load (const char *file_name, struct intr_frame *if_) {
 						zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
 					}
 					if (!load_segment (file, file_page, (void *) mem_page,
-								read_bytes, zero_bytes, writable))
+								read_bytes, zero_bytes, writable)) {
 						goto done;
+					}
 				}
-				else
+				else {
 					goto done;
+				}
 				break;
 		}
 	}
 
 	/* Set up stack. */
-	if (!setup_stack (if_))
+	if (!setup_stack (if_)) {
 		goto done;
+	}
 
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
@@ -688,7 +718,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
 
+	sys_file_lock_acquire ();
 	file_seek (file, ofs);
+	sys_file_lock_release ();
+	
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
 		 * We will read PAGE_READ_BYTES bytes from FILE
@@ -702,10 +735,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 			return false;
 
 		/* Load this page. */
+		sys_file_lock_acquire ();
 		if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes) {
 			palloc_free_page (kpage);
+			sys_file_lock_release ();
 			return false;
 		}
+		sys_file_lock_release ();
 		memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
 		/* Add the page to the process's address space. */

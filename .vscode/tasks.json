@@ -82,7 +82,8 @@
                 "exec-arg",
                 "wait-simple",
                 "fork-once",
-                "fork-boundary"
+                "dup2/dup2-simple",
+                "dup2/dup2-complex"
             ],
             "default": "args-none"
         }

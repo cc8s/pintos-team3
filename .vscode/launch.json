@@ -56,8 +56,7 @@
                 "exec-once",
                 "exec-arg",
                 "wait-simple",
-                "fork-once",
-                "fork-boundary"
+                "fork-once"
             ],
             "default": "args-none"
         }
