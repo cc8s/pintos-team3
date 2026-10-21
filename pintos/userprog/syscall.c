@@ -146,15 +146,26 @@ syscall_handler (struct intr_frame *f) {
 		f->R.rax = file_read (cur->fd_table[fd], buffer, size);
 	}
 	else if (syscall_no == SYS_FILESIZE) {
-	struct thread *cur = thread_current ();
-	int fd = (int) f->R.rdi;
+		struct thread *cur = thread_current ();
+		int fd = (int) f->R.rdi;
 
-	if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
-		f->R.rax = -1;
-		return;
+		if (fd < 2 || fd >= 64 || cur->fd_table[fd] == NULL) {
+			f->R.rax = -1;
+			return;
+		}
+		f->R.rax = file_length (cur->fd_table[fd]);
 	}
-	f->R.rax = file_length (cur->fd_table[fd]);
+	else if (syscall_no == SYS_FORK) {
+		const char *name = (const char *) f->R.rdi;
+		check_address (name);
+		f->R.rax = process_fork (name, f);
 	}
+	else if (syscall_no == SYS_WAIT) {
+		tid_t child_tid = f->R.rdi;
+		f->R.rax = process_wait (child_tid);
+	}
+
+	/* TODO: SYS_SEEK, SYS_TELL, SYS_REMOVE 시스템콜 테스트에 없으나 project3에 필요 */
 	else {
 		thread_exit ();
 	}

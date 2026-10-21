@@ -106,7 +106,12 @@ struct thread {
 	struct semaphore wait_sema;		/* 자식프로세스 종료까지 부모가 대기 */
 	struct semaphore exit_sema;		/* 부모가 자식프로세스의 exit_status를 읽을때까지 대기 */
 
-	struct file *fd_table[64]; /* open 구현에 필요 */
+	struct file *fd_table[64];
+	/* fork 구현 */
+	struct intr_frame parent_if;		/* fork시 부모의 유저 컨텍스트 자식에게 넘김 */
+	struct semaphore fork_sema;		/* 부모가 자식의 복제 완료 대기 */
+	bool fork_ok;		/* 자식이 복제에 성공했는지 */
+
 #endif
 
 #ifdef VM
