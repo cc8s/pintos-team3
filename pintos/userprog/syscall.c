@@ -116,6 +116,34 @@ check_address (void *addr) {
     }
 }
 
+/* 버퍼가 속한 모든 페이지를 한 번씩 읽어서 물리 메모리에 올림(페이지 폴트 유도) */
+void check_valid_buffer (void *buffer, size_t size, bool is_write) {
+    if (size == 0) return;
+
+    char *ptr = (char *) buffer;
+
+    /* 시작 주소부터 PGSIZE 간격으로 체크 */
+    for (size_t i = 0; i < size; i += PGSIZE) {
+        check_address (ptr + i);
+        /* 해당 주소를 한 번 읽어서 (1바이트) 페이지 폴트 유도 
+         * volatile로 선언시 아무 동작도 안하는 변수도 최적화 x */
+        volatile char *p = (volatile char *) (ptr + i);
+        char dummy = *p;
+        /* write면 권한 체크 */
+        if (is_write) {
+            *p = dummy;
+        }
+    }
+    /* 버퍼 마지막 1바이트 체크 (여러 페이지에 걸쳐있을 시 대비) */
+    check_address (ptr + size - 1);
+    
+    volatile char *last_p = (volatile char *) (ptr + size - 1);
+    char dummy = *last_p;
+    if (is_write) {
+        *last_p = dummy;
+    }
+}
+
 
 /* 현재 스레드에 파일 추가 */
 static int 
@@ -287,7 +315,7 @@ sys_filesize (int fd) {
 /* file 데이터 read */
 static int
 sys_read (int fd, void *buffer, unsigned size) {
-    check_address ((void *) buffer);
+    check_valid_buffer (buffer, size, false); 
     struct thread *curr = thread_current ();
 
     init_file_list (curr);
@@ -331,7 +359,7 @@ sys_read (int fd, void *buffer, unsigned size) {
 /* file에 데이터 write */
 static int
 sys_write (int fd, const void *buffer, unsigned size) {
-    check_address ((void *) buffer);
+    check_valid_buffer (buffer, size, true); 
     struct thread *curr = thread_current ();
     
     init_file_list (curr);

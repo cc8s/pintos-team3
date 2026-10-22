@@ -89,9 +89,6 @@ initd (void *f_name) {
 	NOT_REACHED ();
 }
 
-
-
-
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * 실패 시 TID_ERROR 반환 */
 tid_t
@@ -261,6 +258,16 @@ process_exec (void *f_name) {
 		palloc_free_page (file_name);
 		return -1;
     }
+
+	struct thread *curr = thread_current ();
+    if (curr->running_file != NULL) {
+        sys_file_lock_acquire();
+        file_allow_write(curr->running_file); /* 쓰기 금지 해제 */
+        file_close(curr->running_file);       /* 이전 파일 닫기 */
+        sys_file_lock_release();
+        curr->running_file = NULL;
+    }
+
 	/* We first kill the current context */
 	process_cleanup ();
 
@@ -343,12 +350,14 @@ process_wait (tid_t child_tid) {
 	int status = child_status->exit_status;
 	list_remove (&child_status->elem);
 	/* 자식 리스트에서 지우면서 ref_cnt-- */
-    child_status->ref_cnt--;
+    enum intr_level old_level = intr_disable ();
+	child_status->ref_cnt--;
 
     /* 자식도 exit했으면 free (child_status) */
     if (child_status->ref_cnt == 0) {
         free (child_status);
     }
+	intr_set_level (old_level); 
 
 	return status;
 }
@@ -389,19 +398,25 @@ process_exit (void) {
         curr->file_list = NULL;
     }
 
-	printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	if (curr->pml4 != NULL) {
+        printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+    }
 
 	/* 자식 리스트 비우면서 ref_cnt-- */
     while (!list_empty (&curr->children)) {
         struct list_elem *e = list_pop_front (&curr->children);
         struct child_status *child_status = list_entry (e, struct child_status, elem);
-        
+
+        enum intr_level old_level = intr_disable ();
         child_status->ref_cnt--;
         /* 자식도 exit했으면 free (child_status) */
         if (child_status->ref_cnt == 0) {
             free (child_status);
         }
+		intr_set_level (old_level); 
     }
+
+	process_cleanup (); 
 
     if (curr->child_status != NULL) {
         curr->child_status->exit_status = curr->exit_status;
@@ -409,13 +424,14 @@ process_exit (void) {
         sema_up (&curr->child_status->wait_sema);
         
         /* ref_cnt-- */
+		enum intr_level old_level = intr_disable ();
         curr->child_status->ref_cnt--;
         /* 부모도 exit했으면 free (child_status) */
         if (curr->child_status->ref_cnt == 0) {
             free (curr->child_status);
         }
+		intr_set_level (old_level); 
     }
-    process_cleanup (); 
 }
 
 /* Free the current process's resources. */
