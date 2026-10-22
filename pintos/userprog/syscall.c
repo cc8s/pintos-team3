@@ -315,7 +315,7 @@ sys_filesize (int fd) {
 /* file 데이터 read */
 static int
 sys_read (int fd, void *buffer, unsigned size) {
-    check_valid_buffer (buffer, size, true); 
+    check_valid_buffer (buffer, size, false); 
     struct thread *curr = thread_current ();
 
     init_file_list (curr);
